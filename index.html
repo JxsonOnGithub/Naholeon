@@ -94,6 +94,26 @@
             box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4), 0 0 10px var(--dot-glow);
         }
 
+        .ldm-btn {
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            line-height: 1;
+            padding: 3px 6px;
+            border-radius: 9999px;
+            cursor: pointer;
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            background: transparent;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+
+        .ldm-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #09080c;
+        }
+
         @keyframes scorePop {
             0% { transform: scale(1); }
             45% { transform: scale(1.24); }
@@ -118,6 +138,7 @@
                 <div class="flex items-center gap-2">
                     <div id="swatch-container" class="flex items-center gap-1.5"></div>
                     <div class="w-px h-3.5 bg-white/15 mx-0.5"></div>
+                    <button id="ldm-btn" type="button" aria-label="Toggle Low Detail Mode" aria-pressed="false" class="ldm-btn" title="Low Detail Mode (smaller effects)">LDM</button>
                     <button id="mute-btn" type="button" aria-label="Toggle Sound" class="text-xs opacity-85 hover:opacity-100 transition-opacity p-0.5 cursor-pointer" title="Toggle Sound">
                         🔊
                     </button>
@@ -275,6 +296,22 @@
             }
         }
 
+        function loadLDM() {
+            try {
+                return localStorage.getItem('matchHole_ldm') === '1';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function saveLDM(on) {
+            try {
+                localStorage.setItem('matchHole_ldm', on ? '1' : '0');
+            } catch (e) {
+                // Ignore storage errors in restricted iframes
+            }
+        }
+
         /**
          * 3. PROCEDURAL WEB AUDIO SYNTHESIZER
          */
@@ -398,6 +435,9 @@
         let score = 0;
         let bestScore = loadBestScore();
 
+        // Low Detail Mode: smaller, lighter hit effects and glow
+        let ldm = loadLDM();
+
         // Orbital motion & cumulative arc tracking (100% immune to 2*PI wrapping)
         let dotAngle = -Math.PI / 2;
         let targetAngle = Math.PI * 0.15;
@@ -435,9 +475,9 @@
             const stdDev = (maxArc - minArc) / 5.5;
             let sample = mean + sampleGaussian() * stdDev;
 
-            // Skew curve: exponent 1.5 weights closer target distances to be more common on average
+            // Skew curve: exponent 1.8 (up from 1.5) weights closer target distances to be a bit more common
             const normalized = (sample - minArc) / (maxArc - minArc);
-            const skewed = Math.pow(Math.max(0, Math.min(1, normalized)), 1.5);
+            const skewed = Math.pow(Math.max(0, Math.min(1, normalized)), 1.8);
             deltaAngle = minArc + skewed * (maxArc - minArc);
 
             traveledArc = 0;
@@ -457,13 +497,21 @@
             const hx = centerX + Math.cos(angle) * ringRadius;
             const hy = centerY + Math.sin(angle) * ringRadius;
 
+            // Low Detail Mode scales effects down
+            const beatScale = ldm ? 0.45 : 1;   // beat ripple expansion
+            const popScale = ldm ? 0.6 : 1;     // hole pop size
+            const alphaScale = ldm ? 0.6 : 1;   // ripple opacity
+            const speedScale = ldm ? 0.55 : 1;  // spark travel distance
+            const sizeScale = ldm ? 0.6 : 1;    // spark size
+
             // Subtle expanding ring beat ripple (stationary center, no wobble)
             ripples.push({
                 x: centerX,
                 y: centerY,
-                radius: ringRadius,
-                maxRadius: ringRadius + ringThickness * 2.2,
-                alpha: 0.6,
+                // In LDM, start at the ring's outer edge so the pulse emerges outside the band
+                radius: ldm ? ringRadius + ringThickness / 2 : ringRadius,
+                maxRadius: (ldm ? ringRadius + ringThickness / 2 : ringRadius) + ringThickness * 2.2 * beatScale,
+                alpha: 0.6 * alphaScale,
                 color: currentTheme.accent
             });
 
@@ -472,24 +520,24 @@
                 x: hx,
                 y: hy,
                 radius: holeRadius,
-                maxRadius: ringThickness * 1.5,
-                alpha: 0.85,
+                maxRadius: holeRadius + (ringThickness * 1.5 - holeRadius) * popScale,
+                alpha: 0.85 * alphaScale,
                 color: currentTheme.dotColor
             });
 
-            // Particle sparks
-            const count = 14;
+            // Particle sparks (fewer in LDM)
+            const count = ldm ? 6 : 14;
             for (let i = 0; i < count; i++) {
                 const sparkAngle = (TWO_PI * i) / count + (Math.random() - 0.5) * 0.35;
-                const speed = 75 + Math.random() * 145;
+                const speed = (75 + Math.random() * 145) * speedScale;
                 sparks.push({
                     x: hx,
                     y: hy,
                     vx: Math.cos(sparkAngle) * speed,
                     vy: Math.sin(sparkAngle) * speed,
                     life: 1.0,
-                    decay: 2.2 + Math.random() * 1.0,
-                    size: 2 + Math.random() * 2.2,
+                    decay: (2.2 + Math.random() * 1.0) * (ldm ? 1.3 : 1),
+                    size: (2 + Math.random() * 2.2) * sizeScale,
                     color: i % 2 === 0 ? currentTheme.accent : currentTheme.dotColor
                 });
             }
@@ -812,7 +860,7 @@
                 const remaining = deltaAngle - traveledArc;
                 if (Math.abs(remaining) <= getHitTolerance()) {
                     ctx.beginPath();
-                    ctx.arc(holeX, holeY, holeRadius * 1.75, 0, TWO_PI);
+                    ctx.arc(holeX, holeY, holeRadius * (ldm ? 1.35 : 1.75), 0, TWO_PI);
                     ctx.fillStyle = currentTheme.dotGlow;
                     ctx.fill();
                 }
@@ -840,7 +888,7 @@
 
             ctx.save();
             ctx.shadowColor = currentTheme.dotGlow;
-            ctx.shadowBlur = 12;
+            ctx.shadowBlur = ldm ? 5 : 12;
             ctx.beginPath();
             ctx.arc(dotX, dotY, dotRadius, 0, TWO_PI);
             ctx.fillStyle = currentTheme.dotColor;
@@ -910,6 +958,24 @@
         muteBtn.addEventListener('pointerdown', (e) => {
             e.stopPropagation();
         });
+
+        const ldmBtn = document.getElementById('ldm-btn');
+        function syncLDMButton() {
+            ldmBtn.classList.toggle('active', ldm);
+            ldmBtn.setAttribute('aria-pressed', String(ldm));
+            ldmBtn.title = ldm ? 'Low Detail Mode: ON' : 'Low Detail Mode: OFF';
+        }
+        ldmBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            ldm = !ldm;
+            saveLDM(ldm);
+            syncLDMButton();
+            audio.playClick();
+        });
+        ldmBtn.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+        });
+        syncLDMButton();
 
         window.addEventListener('keydown', (e) => {
             if (e.code === 'Space' || e.key === ' ') {
