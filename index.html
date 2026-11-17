@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Match Hole — Timing Reflex Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --outer-bg: #070709;
+            --playfield-bg: #17161d;
+            --ring-color: #4c4a57;
+            --ring-border: rgba(255, 255, 255, 0.08);
+            --hole-color: #09080c;
+            --dot-color: #ffffff;
+            --dot-glow: rgba(255, 255, 255, 0.45);
+            --accent: #f59e0b;
+            --text-main: #ffffff;
+            --text-muted: rgba(255, 255, 255, 0.55);
+            --miss-color: #fb7185;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--outer-bg);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            height: 100dvh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        #game-shell {
+            position: relative;
+            width: 100%;
+            max-width: 420px;
+            height: 100%;
+            max-height: 100dvh;
+            background-color: var(--playfield-bg);
+            box-shadow: 0 0 60px rgba(0, 0, 0, 0.75);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: background-color 0.3s ease;
+        }
+
+        @media (min-width: 520px) {
+            #game-shell {
+                height: 92dvh;
+                max-height: 780px;
+                border-radius: 1.5rem;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+
+        .theme-swatch {
+            width: 22px;
+            height: 22px;
+            border-radius: 9999px;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .theme-swatch:hover {
+            transform: scale(1.12);
+        }
+
+        .theme-swatch.active {
+            transform: scale(1.2);
+            border-color: #ffffff;
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4), 0 0 10px var(--dot-glow);
+        }
+
+        @keyframes scorePop {
+            0% { transform: scale(1); }
+            45% { transform: scale(1.24); }
+            100% { transform: scale(1); }
+        }
+
+        .score-pop {
+            animation: scorePop 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-shell">
+        <!-- Top Minimal HUD Overlay -->
+        <div id="top-hud" class="absolute top-0 left-0 right-0 z-20 p-4 sm:p-5 flex flex-col gap-3 pointer-events-none">
+            <!-- Live Theme Switcher & Audio Bar -->
+            <div id="controls-bar" class="flex items-center justify-between gap-2 pointer-events-auto bg-black/25 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
+                <span id="theme-label" class="text-[11px] font-semibold tracking-wide truncate" style="color: var(--text-muted);">
+                    Obsidian & Ivory
+                </span>
+                <div class="flex items-center gap-2">
+                    <div id="swatch-container" class="flex items-center gap-1.5"></div>
+                    <div class="w-px h-3.5 bg-white/15 mx-0.5"></div>
+                    <button id="mute-btn" type="button" aria-label="Toggle Sound" class="text-xs opacity-85 hover:opacity-100 transition-opacity p-0.5 cursor-pointer" title="Toggle Sound">
+                        🔊
+                    </button>
+                </div>
+            </div>
+
+            <!-- Score & Best Score Display -->
+            <div class="flex items-start justify-between px-1">
+                <div id="score-display" class="text-4xl sm:text-5xl font-extrabold tracking-tight leading-none drop-shadow-sm" style="color: var(--text-main);">
+                    0
+                </div>
+                <div class="text-right">
+                    <div class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-muted);">Best</div>
+                    <div id="best-display" class="text-lg sm:text-xl font-bold leading-tight" style="color: var(--text-main);">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Full-Playfield Responsive Canvas -->
+        <canvas id="game-canvas"></canvas>
+
+        <!-- Start Prompt & Game Over Overlay -->
+        <div id="prompt-overlay" class="absolute inset-0 z-10 flex flex-col items-center justify-between py-24 px-6 pointer-events-none">
+            <div class="h-8"></div>
+
+            <!-- Game Over Card -->
+            <div id="gameover-card" class="hidden pointer-events-auto flex flex-col items-center text-center px-6 py-5 rounded-2xl bg-black/60 backdrop-blur-md border border-white/15 shadow-2xl max-w-[270px] w-full">
+                <div id="miss-reason" class="text-[11px] font-extrabold uppercase tracking-widest mb-1" style="color: var(--miss-color);">
+                    MISSED THE HOLE!
+                </div>
+                <div class="text-4xl font-black mb-1" id="final-score" style="color: var(--text-main);">0</div>
+                <div class="text-xs font-medium mb-4" style="color: var(--text-muted);">
+                    Best Score: <span id="final-best" class="font-bold" style="color: var(--accent);">0</span>
+                </div>
+                <button id="restart-btn" type="button" class="w-full py-2.5 px-5 rounded-xl font-bold text-xs uppercase tracking-wider transition-transform active:scale-95 cursor-pointer shadow-lg"
+                        style="background-color: var(--accent); color: #09080c;">
+                    Play Again
+                </button>
+            </div>
+
+            <!-- Bottom Start / Restart Hint -->
+            <div id="start-hint" class="text-center transition-opacity duration-200">
+                <p id="hint-text" class="text-xs sm:text-sm font-bold uppercase tracking-[0.18em] animate-pulse" style="color: var(--text-muted);">
+                    Tap or Press Space to Start
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 1. CURATED COLOR THEMES
+         */
+        const THEMES = [
+            {
+                id: 'obsidian',
+                name: 'Obsidian & Ivory',
+                swatch: ['#4c4a57', '#f59e0b'],
+                outerBg: '#070709',
+                playfieldBg: '#17161d',
+                ringColor: '#4c4a57',
+                ringInnerShadow: 'rgba(0, 0, 0, 0.32)',
+                holeColor: '#09080c',
+                dotColor: '#ffffff',
+                dotGlow: 'rgba(255, 255, 255, 0.45)',
+                accent: '#f59e0b',
+                textMain: '#ffffff',
+                textMuted: 'rgba(255, 255, 255, 0.55)',
+                missColor: '#fb7185'
+            },
+            {
+                id: 'cyber',
+                name: 'Midnight Cyber',
+                swatch: ['#312e81', '#ec4899'],
+                outerBg: '#03040b',
+                playfieldBg: '#0b0e26',
+                ringColor: '#3730a3',
+                ringInnerShadow: 'rgba(6, 182, 212, 0.22)',
+                holeColor: '#040511',
+                dotColor: '#22d3ee',
+                dotGlow: 'rgba(34, 211, 238, 0.65)',
+                accent: '#ec4899',
+                textMain: '#f0f9ff',
+                textMuted: 'rgba(186, 230, 253, 0.6)',
+                missColor: '#fb7185'
+            },
+            {
+                id: 'matcha',
+                name: 'Matcha & Espresso',
+                swatch: ['#7c9a7e', '#c85a32'],
+                outerBg: '#1c1815',
+                playfieldBg: '#f3efe6',
+                ringColor: '#8ba88d',
+                ringInnerShadow: 'rgba(43, 33, 24, 0.14)',
+                holeColor: '#1b3022',
+                dotColor: '#3b281c',
+                dotGlow: 'rgba(59, 40, 28, 0.35)',
+                accent: '#c85a32',
+                textMain: '#2b2118',
+                textMuted: 'rgba(43, 33, 24, 0.58)',
+                missColor: '#c84b31'
+            },
+            {
+                id: 'sunset',
+                name: 'Sunset Coral',
+                swatch: ['#9f4a62', '#fb7185'],
+                outerBg: '#0f0610',
+                playfieldBg: '#261128',
+                ringColor: '#9f4a62',
+                ringInnerShadow: 'rgba(15, 5, 20, 0.35)',
+                holeColor: '#140616',
+                dotColor: '#fff1e6',
+                dotGlow: 'rgba(255, 241, 230, 0.6)',
+                accent: '#fb7185',
+                textMain: '#fff1f2',
+                textMuted: 'rgba(255, 228, 230, 0.6)',
+                missColor: '#fda4af'
+            },
+            {
+                id: 'nordic',
+                name: 'Nordic Frost',
+                swatch: ['#526d8a', '#38bdf8'],
+                outerBg: '#0b111a',
+                playfieldBg: '#dbe6f2',
+                ringColor: '#69839e',
+                ringInnerShadow: 'rgba(15, 23, 42, 0.16)',
+                holeColor: '#0f172a',
+                dotColor: '#ffffff',
+                dotGlow: 'rgba(56, 189, 248, 0.65)',
+                accent: '#0284c7',
+                textMain: '#0f172a',
+                textMuted: 'rgba(15, 23, 42, 0.58)',
+                missColor: '#e11d48'
+            }
+        ];
+
+        let currentTheme = THEMES[0];
+
+        /**
+         * 2. SAFE STORAGE HELPERS (Sandbox-proof)
+         */
+        function loadBestScore() {
+            try {
+                return parseInt(localStorage.getItem('matchHole_bestScore') || '0', 10) || 0;
+            } catch (e) {
+                return 0;
+            }
+        }
+
+        function saveBestScore(val) {
+            try {
+                localStorage.setItem('matchHole_bestScore', String(val));
+            } catch (e) {
+                // Ignore storage errors in restricted iframes
+            }
+        }
+
+        /**
+         * 3. PROCEDURAL WEB AUDIO SYNTHESIZER
+         */
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.muted = false;
+            }
+
+            ensureContext() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) {
+                        this.ctx = new AudioCtx();
+                    }
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume().catch(() => {});
+                }
+            }
+
+            playHit(streak) {
+                if (this.muted) return;
+                this.ensureContext();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+                const semitoneSteps = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
+                const step = semitoneSteps[Math.min(streak, semitoneSteps.length - 1)];
+                const baseFreq = 440 * Math.pow(2, step / 12);
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(baseFreq, now);
+                osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.03, now + 0.12);
+
+                gain.gain.setValueAtTime(0.001, now);
+                gain.gain.linearRampToValueAtTime(0.22, now + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.19);
+
+                const osc2 = this.ctx.createOscillator();
+                const gain2 = this.ctx.createGain();
+                osc2.type = 'triangle';
+                osc2.frequency.setValueAtTime(baseFreq * 2, now);
+                gain2.gain.setValueAtTime(0.06, now);
+                gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+
+                osc2.connect(gain2);
+                gain2.connect(this.ctx.destination);
+                osc2.start(now);
+                osc2.stop(now + 0.1);
+            }
+
+            playMiss() {
+                if (this.muted) return;
+                this.ensureContext();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(165, now);
+                osc.frequency.exponentialRampToValueAtTime(52, now + 0.28);
+
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.31);
+            }
+
+            playClick() {
+                if (this.muted) return;
+                this.ensureContext();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(580, now);
+                gain.gain.setValueAtTime(0.07, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.055);
+            }
+        }
+
+        const audio = new SoundEngine();
+
+        /**
+         * 4. CORE GAME STATE & GEOMETRY
+         */
+        const TWO_PI = Math.PI * 2;
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const shell = document.getElementById('game-shell');
+
+        let width = 360;
+        let height = 640;
+        let centerX = 180;
+        let centerY = 307;
+        let ringRadius = 90;
+        let ringThickness = 21;
+        let dotRadius = 5.5;
+        let holeRadius = 6.8;
+
+        // States: 'IDLE' | 'PLAYING' | 'GAMEOVER'
+        let state = 'IDLE';
+        let score = 0;
+        let bestScore = loadBestScore();
+
+        // Orbital motion & cumulative arc tracking (100% immune to 2*PI wrapping)
+        let dotAngle = -Math.PI / 2;
+        let targetAngle = Math.PI * 0.15;
+        let dir = 1; // 1 = clockwise, -1 = counter-clockwise
+        let angularSpeed = 1.95; // Slower base speed
+        let deltaAngle = Math.PI * 0.65; // Positive angular distance from spawn to target hole
+        let traveledArc = 0; // Positive cumulative angular progress since last hit/start
+
+        // Visual particles & feedback
+        let ripples = [];
+        let sparks = [];
+        let missMarker = null;
+        let gameOverTimestamp = 0;
+        let lastFrameTime = 0;
+
+        /**
+         * 5. BOX-MULLER GAUSSIAN SPAWNING (Skewed toward closer distances)
+         */
+        function sampleGaussian() {
+            let u = 0;
+            let v = 0;
+            while (u === 0) u = Math.random();
+            while (v === 0) v = Math.random();
+            return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(TWO_PI * v);
+        }
+
+        function spawnNextHole() {
+            const maxArc = 1.2 * Math.PI; // 60% of the full 2*PI ring
+            let minArc = Math.max(0.35, angularSpeed * 0.20); // At least 200ms reaction floor
+            if (minArc >= maxArc * 0.9) {
+                minArc = maxArc * 0.75;
+            }
+
+            const mean = (minArc + maxArc) / 2;
+            const stdDev = (maxArc - minArc) / 5.5;
+            let sample = mean + sampleGaussian() * stdDev;
+
+            // Skew curve: exponent 1.5 weights closer target distances to be more common on average
+            const normalized = (sample - minArc) / (maxArc - minArc);
+            const skewed = Math.pow(Math.max(0, Math.min(1, normalized)), 1.5);
+            deltaAngle = minArc + skewed * (maxArc - minArc);
+
+            traveledArc = 0;
+            targetAngle = dotAngle + dir * deltaAngle;
+        }
+
+        function getHitTolerance() {
+            const holeAngularRadius = holeRadius / Math.max(1, ringRadius);
+            const dotAngularRadius = dotRadius / Math.max(1, ringRadius);
+            return holeAngularRadius + dotAngularRadius * 1.15;
+        }
+
+        /**
+         * 6. VISUAL JUICE SPAWNERS (Beat Ripple + Sparks, Zero Shake)
+         */
+        function spawnHitEffects(angle) {
+            const hx = centerX + Math.cos(angle) * ringRadius;
+            const hy = centerY + Math.sin(angle) * ringRadius;
+
+            // Subtle expanding ring beat ripple (stationary center, no wobble)
+            ripples.push({
+                x: centerX,
+                y: centerY,
+                radius: ringRadius,
+                maxRadius: ringRadius + ringThickness * 2.2,
+                alpha: 0.6,
+                color: currentTheme.accent
+            });
+
+            // Local hole pop ripple
+            ripples.push({
+                x: hx,
+                y: hy,
+                radius: holeRadius,
+                maxRadius: ringThickness * 1.5,
+                alpha: 0.85,
+                color: currentTheme.dotColor
+            });
+
+            // Particle sparks
+            const count = 14;
+            for (let i = 0; i < count; i++) {
+                const sparkAngle = (TWO_PI * i) / count + (Math.random() - 0.5) * 0.35;
+                const speed = 75 + Math.random() * 145;
+                sparks.push({
+                    x: hx,
+                    y: hy,
+                    vx: Math.cos(sparkAngle) * speed,
+                    vy: Math.sin(sparkAngle) * speed,
+                    life: 1.0,
+                    decay: 2.2 + Math.random() * 1.0,
+                    size: 2 + Math.random() * 2.2,
+                    color: i % 2 === 0 ? currentTheme.accent : currentTheme.dotColor
+                });
+            }
+        }
+
+        /**
+         * 7. RESPONSIVE CANVAS SIZING (Guaranteed non-zero dimensions)
+         */
+        function resizeCanvas() {
+            const rect = shell.getBoundingClientRect();
+            const rawWidth = rect.width > 0 ? rect.width : Math.min(window.innerWidth || 360, 420);
+            const rawHeight = rect.height > 0 ? rect.height : (window.innerHeight || 640);
+
+            width = Math.max(240, rawWidth);
+            height = Math.max(320, rawHeight);
+
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            canvas.width = Math.round(width * dpr);
+            canvas.height = Math.round(height * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            centerX = width / 2;
+            centerY = height * 0.48;
+
+            // Sleek, skinny circular track (~23% of ring radius)
+            const minDim = Math.min(width, height);
+            ringRadius = Math.max(64, Math.round(minDim * 0.25));
+            ringThickness = Math.max(15, Math.round(ringRadius * 0.23));
+            dotRadius = Math.max(4.5, Math.round(ringThickness * 0.25));
+            holeRadius = Math.max(5.5, Math.round(ringThickness * 0.29));
+        }
+
+        /**
+         * 8. UI & THEME MANAGEMENT
+         */
+        function applyTheme(theme) {
+            currentTheme = theme;
+            const root = document.documentElement.style;
+            root.setProperty('--outer-bg', theme.outerBg);
+            root.setProperty('--playfield-bg', theme.playfieldBg);
+            root.setProperty('--ring-color', theme.ringColor);
+            root.setProperty('--hole-color', theme.holeColor);
+            root.setProperty('--dot-color', theme.dotColor);
+            root.setProperty('--dot-glow', theme.dotGlow);
+            root.setProperty('--accent', theme.accent);
+            root.setProperty('--text-main', theme.textMain);
+            root.setProperty('--text-muted', theme.textMuted);
+            root.setProperty('--miss-color', theme.missColor);
+
+            document.getElementById('theme-label').textContent = theme.name;
+
+            document.querySelectorAll('.theme-swatch').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.themeId === theme.id);
+            });
+        }
+
+        function initThemeSwatches() {
+            const container = document.getElementById('swatch-container');
+            container.innerHTML = '';
+            THEMES.forEach((theme) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'theme-swatch';
+                btn.dataset.themeId = theme.id;
+                btn.title = theme.name;
+                btn.setAttribute('aria-label', theme.name);
+                btn.style.background = `linear-gradient(135deg, ${theme.swatch[0]} 50%, ${theme.swatch[1]} 50%)`;
+
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    audio.playClick();
+                    applyTheme(theme);
+                });
+
+                btn.addEventListener('pointerdown', (e) => {
+                    e.stopPropagation();
+                });
+
+                container.appendChild(btn);
+            });
+            applyTheme(THEMES[0]);
+        }
+
+        function updateScoreDisplay(animate) {
+            const scoreEl = document.getElementById('score-display');
+            const bestEl = document.getElementById('best-display');
+            scoreEl.textContent = String(score);
+            bestEl.textContent = String(bestScore);
+
+            if (animate) {
+                scoreEl.classList.remove('score-pop');
+                void scoreEl.offsetWidth;
+                scoreEl.classList.add('score-pop');
+            }
+        }
+
+        /**
+         * 9. GAME FLOW CONTROLS
+         */
+        function startGame() {
+            audio.ensureContext();
+            score = 0;
+            dir = 1;
+            angularSpeed = 1.95;
+            dotAngle = -Math.PI / 2;
+
+            // Initial comfortable target ~115 degrees ahead
+            deltaAngle = Math.PI * 0.64;
+            traveledArc = 0;
+            targetAngle = dotAngle + dir * deltaAngle;
+
+            ripples = [];
+            sparks = [];
+            missMarker = null;
+
+            updateScoreDisplay(false);
+            document.getElementById('gameover-card').classList.add('hidden');
+            document.getElementById('start-hint').classList.add('opacity-0');
+
+            state = 'PLAYING';
+        }
+
+        function triggerGameOver(reasonText) {
+            state = 'GAMEOVER';
+            gameOverTimestamp = performance.now();
+            audio.playMiss();
+
+            missMarker = {
+                angle: dotAngle
+            };
+
+            if (score > bestScore) {
+                bestScore = score;
+                saveBestScore(bestScore);
+                updateScoreDisplay(false);
+            }
+
+            document.getElementById('miss-reason').textContent = reasonText;
+            document.getElementById('final-score').textContent = String(score);
+            document.getElementById('final-best').textContent = String(bestScore);
+            document.getElementById('gameover-card').classList.remove('hidden');
+
+            const hintEl = document.getElementById('start-hint');
+            document.getElementById('hint-text').textContent = 'Tap or Press Space to Restart';
+            hintEl.classList.remove('opacity-0');
+        }
+
+        function handlePlayerAction() {
+            if (state === 'IDLE') {
+                startGame();
+                return;
+            }
+
+            if (state === 'GAMEOVER') {
+                if (performance.now() - gameOverTimestamp < 250) return;
+                startGame();
+                return;
+            }
+
+            if (state === 'PLAYING') {
+                const remaining = deltaAngle - traveledArc;
+                const hitTolerance = getHitTolerance();
+
+                if (Math.abs(remaining) <= hitTolerance) {
+                    // Successful match!
+                    const hitSpotAngle = targetAngle;
+                    score += 1;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        saveBestScore(bestScore);
+                    }
+                    updateScoreDisplay(true);
+                    audio.playHit(score);
+                    spawnHitEffects(hitSpotAngle);
+
+                    // Reverse orbital direction & gently scale speed
+                    dir = -dir;
+                    angularSpeed = Math.min(4.2, 1.95 + score * 0.045);
+
+                    // Spawn next hole along the new direction using skewed normal distribution
+                    spawnNextHole();
+                } else {
+                    const reason = remaining > 0 ? 'TOO EARLY!' : 'TOO LATE!';
+                    triggerGameOver(reason);
+                }
+            }
+        }
+
+        /**
+         * 10. SIMULATION & RENDERING LOOP
+         */
+        function update(dt) {
+            // Update beat ripples
+            for (let i = ripples.length - 1; i >= 0; i--) {
+                const r = ripples[i];
+                r.radius += (r.maxRadius - r.radius) * Math.min(1, dt * 11);
+                r.alpha -= dt * 1.9;
+                if (r.alpha <= 0.01) {
+                    ripples.splice(i, 1);
+                }
+            }
+
+            // Update spark particles
+            for (let i = sparks.length - 1; i >= 0; i--) {
+                const s = sparks[i];
+                s.x += s.vx * dt;
+                s.y += s.vy * dt;
+                s.vx *= 0.92;
+                s.vy *= 0.92;
+                s.life -= s.decay * dt;
+                if (s.life <= 0) {
+                    sparks.splice(i, 1);
+                }
+            }
+
+            if (state === 'IDLE') {
+                // Gentle preview orbit on title state
+                dotAngle += 0.9 * dt;
+                return;
+            }
+
+            if (state === 'PLAYING') {
+                const step = angularSpeed * dt;
+                dotAngle += dir * step;
+                traveledArc += step;
+
+                const remaining = deltaAngle - traveledArc;
+                const hitTolerance = getHitTolerance();
+
+                // Automatic miss if dot travels completely past the hole without a click
+                if (remaining < -hitTolerance) {
+                    triggerGameOver('MISSED THE HOLE!');
+                }
+            }
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, width, height);
+
+            // 1. Center Compass Needle pointing to the Dot
+            const needleLength = ringRadius * 0.52;
+            const needleTipX = centerX + Math.cos(dotAngle) * needleLength;
+            const needleTipY = centerY + Math.sin(dotAngle) * needleLength;
+            const needleBackX = centerX - Math.cos(dotAngle) * (needleLength * 0.35);
+            const needleBackY = centerY - Math.sin(dotAngle) * (needleLength * 0.35);
+
+            // Compass center pivot glow
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ringRadius * 0.65, 0, TWO_PI);
+            ctx.fillStyle = currentTheme.playfieldBg;
+            ctx.fill();
+
+            // Subtle compass tick marks
+            for (let i = 0; i < 4; i++) {
+                const tickAngle = (i * Math.PI) / 2;
+                const innerT = ringRadius * 0.42;
+                const outerT = ringRadius * 0.52;
+                ctx.beginPath();
+                ctx.moveTo(centerX + Math.cos(tickAngle) * innerT, centerY + Math.sin(tickAngle) * innerT);
+                ctx.lineTo(centerX + Math.cos(tickAngle) * outerT, centerY + Math.sin(tickAngle) * outerT);
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = currentTheme.ringColor;
+                ctx.globalAlpha = 0.4;
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+
+            // Compass needle body (arrow pointing to dot)
+            ctx.beginPath();
+            ctx.moveTo(needleTipX, needleTipY);
+            // Orthogonal wing offsets for arrowhead
+            const perpAngle = dotAngle + Math.PI / 2;
+            const wingWidth = 7;
+            ctx.lineTo(
+                centerX + Math.cos(dotAngle) * (needleLength * 0.6) + Math.cos(perpAngle) * wingWidth,
+                centerY + Math.sin(dotAngle) * (needleLength * 0.6) + Math.sin(perpAngle) * wingWidth
+            );
+            ctx.lineTo(needleBackX, needleBackY);
+            ctx.lineTo(
+                centerX + Math.cos(dotAngle) * (needleLength * 0.6) - Math.cos(perpAngle) * wingWidth,
+                centerY + Math.sin(dotAngle) * (needleLength * 0.6) - Math.sin(perpAngle) * wingWidth
+            );
+            ctx.closePath();
+            ctx.fillStyle = currentTheme.accent;
+            ctx.globalAlpha = 0.85;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+
+            // Center pivot cap
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 5, 0, TWO_PI);
+            ctx.fillStyle = currentTheme.dotColor;
+            ctx.fill();
+
+            // 2. Stationary, Rock-Steady Circular Ring Track
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ringRadius, 0, TWO_PI);
+            ctx.lineWidth = ringThickness;
+            ctx.strokeStyle = currentTheme.ringColor;
+            ctx.stroke();
+
+            // Subtle crisp inner & outer rim strokes
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ringRadius + ringThickness / 2, 0, TWO_PI);
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ringRadius - ringThickness / 2, 0, TWO_PI);
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = currentTheme.ringInnerShadow;
+            ctx.stroke();
+
+            // 3. Dark Target Hole on Ring Centerline
+            const holeX = centerX + Math.cos(targetAngle) * ringRadius;
+            const holeY = centerY + Math.sin(targetAngle) * ringRadius;
+
+            if (state === 'PLAYING') {
+                const remaining = deltaAngle - traveledArc;
+                if (Math.abs(remaining) <= getHitTolerance()) {
+                    ctx.beginPath();
+                    ctx.arc(holeX, holeY, holeRadius * 1.75, 0, TWO_PI);
+                    ctx.fillStyle = currentTheme.dotGlow;
+                    ctx.fill();
+                }
+            }
+
+            ctx.beginPath();
+            ctx.arc(holeX, holeY, holeRadius, 0, TWO_PI);
+            ctx.fillStyle = currentTheme.holeColor;
+            ctx.fill();
+
+            // 4. Miss Indicator Ring on Game Over
+            if (missMarker) {
+                const mx = centerX + Math.cos(missMarker.angle) * ringRadius;
+                const my = centerY + Math.sin(missMarker.angle) * ringRadius;
+                ctx.beginPath();
+                ctx.arc(mx, my, dotRadius * 2.2, 0, TWO_PI);
+                ctx.lineWidth = 2.5;
+                ctx.strokeStyle = currentTheme.missColor;
+                ctx.stroke();
+            }
+
+            // 5. Luminous Orbiting Dot on Ring Centerline
+            const dotX = centerX + Math.cos(dotAngle) * ringRadius;
+            const dotY = centerY + Math.sin(dotAngle) * ringRadius;
+
+            ctx.save();
+            ctx.shadowColor = currentTheme.dotGlow;
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.arc(dotX, dotY, dotRadius, 0, TWO_PI);
+            ctx.fillStyle = currentTheme.dotColor;
+            ctx.fill();
+            ctx.restore();
+
+            // 6. Subtle Expanding Beat Ripples
+            for (const r of ripples) {
+                ctx.beginPath();
+                ctx.arc(r.x, r.y, r.radius, 0, TWO_PI);
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = r.color;
+                ctx.globalAlpha = Math.max(0, r.alpha);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+
+            // 7. Spark Particle Bursts
+            for (const s of sparks) {
+                ctx.globalAlpha = Math.max(0, s.life);
+                ctx.fillStyle = s.color;
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, TWO_PI);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        function gameLoop(timestamp) {
+            if (!lastFrameTime) lastFrameTime = timestamp;
+            const rawDt = (timestamp - lastFrameTime) / 1000;
+            lastFrameTime = timestamp;
+
+            // Clamp dt to prevent huge jumps if tab loses focus
+            const dt = Math.min(Math.max(rawDt, 0), 0.05);
+
+            update(dt);
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        /**
+         * 11. INPUT & EVENT LISTENERS
+         */
+        canvas.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            handlePlayerAction();
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            handlePlayerAction();
+        });
+
+        document.getElementById('restart-btn').addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+        });
+
+        const muteBtn = document.getElementById('mute-btn');
+        muteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            audio.muted = !audio.muted;
+            muteBtn.textContent = audio.muted ? '🔇' : '🔊';
+            if (!audio.muted) audio.playClick();
+        });
+
+        muteBtn.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.key === ' ') {
+                e.preventDefault();
+                if (!e.repeat) {
+                    handlePlayerAction();
+                }
+            }
+        });
+
+        window.addEventListener('resize', resizeCanvas);
+
+        window.onload = function () {
+            initThemeSwatches();
+            updateScoreDisplay(false);
+            resizeCanvas();
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
